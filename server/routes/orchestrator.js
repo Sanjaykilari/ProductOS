@@ -271,9 +271,9 @@ router.post("/tasks/:id/assign", async (req, res) => {
 router.post("/tasks/:id/execute", async (req, res) => {
   try {
     const { id } = req.params;
-    const { agentName } = req.body; // optional override
+    const { agentName, additionalInstructions } = req.body; // accept additionalInstructions override
 
-    const result = await agentFramework.executeTaskById(id, agentName || null);
+    const result = await agentFramework.executeTaskById(id, agentName || null, additionalInstructions || null);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -308,6 +308,146 @@ router.post("/approve-all/:projectId", async (req, res) => {
     const { projectId } = req.params;
     const result = await orchestrator.approveAllInProject(projectId);
     res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 20. DELETE /api/orchestrator/projects/:id — delete project and children
+router.delete("/projects/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Cascading delete using transactions or queries
+    await dbRun(`DELETE FROM projects WHERE id = ?`, [id]);
+    
+    const epics = await dbAll(`SELECT id FROM epics WHERE project_id = ?`, [id]);
+    for (const epic of epics) {
+      const features = await dbAll(`SELECT id FROM features WHERE epic_id = ?`, [epic.id]);
+      for (const feat of features) {
+        const stories = await dbAll(`SELECT id FROM stories WHERE feature_id = ?`, [feat.id]);
+        for (const story of stories) {
+          await dbRun(`DELETE FROM tasks WHERE story_id = ?`, [story.id]);
+        }
+        await dbRun(`DELETE FROM stories WHERE feature_id = ?`, [feat.id]);
+      }
+      await dbRun(`DELETE FROM features WHERE epic_id = ?`, [epic.id]);
+    }
+    await dbRun(`DELETE FROM epics WHERE project_id = ?`, [id]);
+    await dbRun(`DELETE FROM documents WHERE project_id = ?`, [id]);
+
+    await dbRun(`
+      INSERT INTO notifications (type, message)
+      VALUES ('Warning', 'Project ${id} has been deleted.')
+    `);
+
+    res.json({ success: true, message: `Project ${id} deleted.` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 21. POST /api/orchestrator/projects/:id/update — human update project details
+router.post("/projects/:id/update", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, description, vision, goals, tech_stack } = req.body;
+    await dbRun(`
+      UPDATE projects 
+      SET title = ?, description = ?, vision = ?, goals = ?, tech_stack = ?
+      WHERE id = ?
+    `, [title, description, vision, goals, tech_stack, id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 22. POST /api/orchestrator/epics/:id/update — human update epic details
+router.post("/epics/:id/update", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, description } = req.body;
+    await dbRun(`UPDATE epics SET title = ?, description = ? WHERE id = ?`, [title, description, id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 23. POST /api/orchestrator/features/:id/update — human update feature details
+router.post("/features/:id/update", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, description } = req.body;
+    await dbRun(`UPDATE features SET title = ?, description = ? WHERE id = ?`, [title, description, id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 24. POST /api/orchestrator/stories/:id/update — human update story details
+router.post("/stories/:id/update", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, template } = req.body;
+    await dbRun(`UPDATE stories SET title = ?, template = ? WHERE id = ?`, [title, template, id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 25. POST /api/orchestrator/tasks/:id/update — human update task details
+router.post("/tasks/:id/update", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, description, assignee, points, status } = req.body;
+    await dbRun(`
+      UPDATE tasks 
+      SET title = ?, description = ?, assignee = ?, points = ?, status = ?
+      WHERE id = ?
+    `, [title, description, assignee, points, status, id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 26. POST /api/orchestrator/documents — human create custom document
+router.post("/documents", async (req, res) => {
+  try {
+    const { projectId, title, content, docType, linkedItemType, linkedItemId } = req.body;
+    const id = `doc-${Date.now()}`;
+    await dbRun(`
+      INSERT INTO documents (id, project_id, title, content, doc_type, linked_item_type, linked_item_id, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'Approved')
+    `, [id, projectId, title, content, docType || 'General', linkedItemType || null, linkedItemId || null]);
+    res.json({ success: true, id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 27. POST /api/orchestrator/documents/:id/update — human edit/save document content
+router.post("/documents/:id/update", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, content } = req.body;
+    await dbRun(`UPDATE documents SET title = ?, content = ? WHERE id = ?`, [title, content, id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 28. DELETE /api/orchestrator/documents/:id — human delete document
+router.delete("/documents/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await dbRun(`DELETE FROM documents WHERE id = ?`, [id]);
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

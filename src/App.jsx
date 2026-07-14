@@ -63,12 +63,17 @@ export default function App() {
     }
   };
 
+  const [sharedState, setSharedState] = useState({ activeDocId: null });
+
   const renderModule = () => {
     switch (activeModule) {
       case "dashboard":
         return <Dashboard setActiveModule={setActiveModule} />;
       case "projects":
-        return <Projects />;
+        return <Projects onNavigateToDoc={(docId) => {
+          setSharedState({ activeDocId: docId });
+          setActiveModule("knowledge");
+        }} />;
       case "product-mgmt":
         return <ProductManagement />;
       case "epics":
@@ -82,7 +87,10 @@ export default function App() {
       case "ai-employees":
         return <AIEmployees />;
       case "knowledge":
-        return <KnowledgeCenter />;
+        return <KnowledgeCenter 
+          activeDocId={sharedState.activeDocId} 
+          onDocCleared={() => setSharedState({ activeDocId: null })} 
+        />;
       case "ai-chat":
         return <AIChat />;
       case "automation":

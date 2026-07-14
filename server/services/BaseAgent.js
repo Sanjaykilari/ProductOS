@@ -64,7 +64,7 @@ export class BaseAgent {
   }
 
   // Contract Step 5: Execute via AI Integration Layer
-  async execute(task, contextData) {
+  async execute(task, contextData, additionalInstructions = null) {
     console.log(`[Agent: ${this.name}] 🧠 Triggering reasoning engine (DeepSeek)...`);
     
     const resolvedSkills = skillManager.resolveSkills(this.skills);
@@ -94,7 +94,7 @@ STRUCTURED OUTPUT:
 <Conform your actual technical payload here (JSON or Markdown)>
 ---`;
 
-    const userPrompt = `Task Key: TASK-${task.id}
+    let userPrompt = `Task Key: TASK-${task.id}
 Task Title: ${task.title}
 Task Description: ${task.description}
 
@@ -103,6 +103,10 @@ ${contextData.context}
 
 Recent Decisions:
 ${contextData.recentDecisions}`;
+
+    if (additionalInstructions) {
+      userPrompt += `\n\n=========================================\nADDITIONAL USER INSTRUCTIONS / UPLOADED REFERENCE DOCUMENT:\n${additionalInstructions}\n=========================================`;
+    }
 
     // Call AIService (DeepSeek)
     const result = await AIService.generateCompletion({

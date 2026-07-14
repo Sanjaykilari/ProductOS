@@ -203,11 +203,11 @@ export const api = {
     return res.json();
   },
 
-  async executeTask(taskId, agentName = null) {
+  async executeTask(taskId, agentName = null, additionalInstructions = null) {
     const res = await fetch(`${BASE_URL}/api/orchestrator/tasks/${encodeURIComponent(taskId)}/execute`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ agentName }),
+      body: JSON.stringify({ agentName, additionalInstructions }),
     });
     if (!res.ok) throw new Error((await res.json()).error || "Execution failed");
     return res.json();
@@ -215,6 +215,93 @@ export const api = {
 
   async getTaskOutput(taskId) {
     const res = await fetch(`${BASE_URL}/api/orchestrator/tasks/${encodeURIComponent(taskId)}/output`);
+    return res.json();
+  },
+
+  // ─── Collaborative Updates & Deletions ────────────────────────────
+  async deleteProject(projectId) {
+    const res = await fetch(`${BASE_URL}/api/orchestrator/projects/${encodeURIComponent(projectId)}`, {
+      method: "DELETE"
+    });
+    if (!res.ok) throw new Error((await res.json()).error || "Project deletion failed");
+    return res.json();
+  },
+
+  async updateProject(projectId, data) {
+    const res = await fetch(`${BASE_URL}/api/orchestrator/projects/${encodeURIComponent(projectId)}/update`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || "Project update failed");
+    return res.json();
+  },
+
+  async updateEpic(epicId, data) {
+    const res = await fetch(`${BASE_URL}/api/orchestrator/epics/${encodeURIComponent(epicId)}/update`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || "Epic update failed");
+    return res.json();
+  },
+
+  async updateFeature(featId, data) {
+    const res = await fetch(`${BASE_URL}/api/orchestrator/features/${encodeURIComponent(featId)}/update`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || "Feature update failed");
+    return res.json();
+  },
+
+  async updateStory(storyId, data) {
+    const res = await fetch(`${BASE_URL}/api/orchestrator/stories/${encodeURIComponent(storyId)}/update`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || "Story update failed");
+    return res.json();
+  },
+
+  async updateTask(taskId, data) {
+    const res = await fetch(`${BASE_URL}/api/orchestrator/tasks/${encodeURIComponent(taskId)}/update`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || "Task update failed");
+    return res.json();
+  },
+
+  async createDocument(docData) {
+    const res = await fetch(`${BASE_URL}/api/orchestrator/documents`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(docData),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || "Failed to create document");
+    return res.json();
+  },
+
+  async updateDocument(docId, data) {
+    const res = await fetch(`${BASE_URL}/api/orchestrator/documents/${encodeURIComponent(docId)}/update`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || "Failed to update document");
+    return res.json();
+  },
+
+  async deleteDocument(docId) {
+    const res = await fetch(`${BASE_URL}/api/orchestrator/documents/${encodeURIComponent(docId)}`, {
+      method: "DELETE"
+    });
+    if (!res.ok) throw new Error((await res.json()).error || "Failed to delete document");
     return res.json();
   },
 };

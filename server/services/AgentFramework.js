@@ -148,7 +148,7 @@ class AgentRegistry {
   }
 
   // Execute a task by its ID — loads task from DB and runs the full agent contract
-  async executeTaskById(taskId, agentName) {
+  async executeTaskById(taskId, agentName, additionalInstructions = null) {
     const task = await dbGet(`SELECT * FROM tasks WHERE id = ?`, [taskId]);
     if (!task) throw new Error(`Task [${taskId}] not found in database.`);
 
@@ -170,7 +170,7 @@ class AgentRegistry {
     eventBus.publish("TaskStatusChanged", { taskId, status: "Executing" });
 
     // Run the agent task
-    await this.runAgentTask(effectiveAgent, { ...task, id: taskId });
+    await this.runAgentTask(effectiveAgent, { ...task, id: taskId }, false, additionalInstructions);
 
     // Mark completed
     await dbRun(`UPDATE tasks SET status = 'Completed' WHERE id = ?`, [taskId]);
@@ -183,7 +183,7 @@ class AgentRegistry {
   }
 
   // Execute an AI employee agent task conforming to contract
-  async runAgentTask(agentName, task, simulateFailure = false) {
+  async runAgentTask(agentName, task, simulateFailure = false, additionalInstructions = null) {
     const agent = this.agents[agentName];
     if (!agent) {
       throw new Error(`Agent [${agentName}] is not registered in framework.`);
@@ -220,7 +220,7 @@ class AgentRegistry {
       await new Promise(r => setTimeout(r, 600));
 
       // 5. Execute reasoning via AIService (triggers real DeepSeek API call)
-      const rawResponse = await agent.execute(task, context);
+      const rawResponse = await agent.execute(task, context, additionalInstructions);
 
       // 6. Validate Output compliance
       const parsedResult = agent.validateOutput(rawResponse);
