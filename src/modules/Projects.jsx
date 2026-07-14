@@ -32,6 +32,110 @@ function StatusBadge({ status }) {
   );
 }
 
+// Subcomponent to avoid React Hook Rules violation (Hooks in loops)
+function ProjectTaskRow({ task, onExecute, onApprove, isExecuting, onStartEdit, onPreview }) {
+  const [assignee, setAssignee] = useState(task.assignee || "Developer Agent");
+
+  const handleAssign = async (agentName) => {
+    setAssignee(agentName);
+    try {
+      await api.assignTaskAgent(task.id, agentName);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  return (
+    <div style={{
+      background: "var(--bg-card)", border: "1px solid var(--border-secondary)",
+      borderRadius: "8px", padding: "10px 14px", marginBottom: "6px"
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <span style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-primary)" }}>{task.title}</span>
+            <StatusBadge status={task.status} />
+          </div>
+          {task.description && (
+            <p style={{ fontSize: "11px", color: "var(--text-muted)", margin: "3px 0 0", lineHeight: "1.4" }}>
+              {task.description}
+            </p>
+          )}
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          {/* Edit button */}
+          <button onClick={() => onStartEdit("Task", task)} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "4px" }}>
+            <Edit3 size={11} />
+          </button>
+
+          {/* Assignee */}
+          <select
+            value={assignee}
+            onChange={e => handleAssign(e.target.value)}
+            style={{
+              fontSize: "10px", padding: "4px 6px", borderRadius: "6px",
+              background: "var(--bg-hover)", border: "1px solid var(--border-primary)",
+              color: "var(--text-secondary)", cursor: "pointer", minWidth: "120px"
+            }}
+          >
+            {AGENT_LIST.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+
+          {/* Approve */}
+          {task.status === "Draft" && (
+            <button onClick={() => onApprove(task.id)} className="btn btn-sm" style={{
+              background: "#10b98122", border: "1px solid #10b98144", color: "#10b981",
+              fontSize: "10px", padding: "4px 8px", borderRadius: "6px", cursor: "pointer",
+              display: "flex", alignItems: "center", gap: "3px"
+            }}>
+              <ThumbsUp size={10} /> Approve
+            </button>
+          )}
+
+          {/* Execute Task (triggers instructions modal override) */}
+          {(task.status === "Approved" || task.status === "Assigned" || task.status === "Draft") && (
+            <button
+              onClick={() => onExecute(task, assignee)}
+              disabled={isExecuting}
+              className="btn btn-sm"
+              style={{
+                background: isExecuting ? "var(--bg-hover)" : "linear-gradient(135deg, #6366f1, #7c3aed)",
+                border: "none", color: isExecuting ? "var(--text-muted)" : "#fff",
+                fontSize: "10px", padding: "4px 10px", borderRadius: "6px",
+                cursor: isExecuting ? "not-allowed" : "pointer",
+                display: "flex", alignItems: "center", gap: "3px"
+              }}
+            >
+              {isExecuting ? <><RefreshCw size={10} style={{ animation: "spin 1s linear infinite" }} /> Running…</> : <><Play size={10} /> Execute</>}
+            </button>
+          )}
+
+          {/* View Build (Browser Preview) & output */}
+          {task.status === "Completed" && (
+            <div style={{ display: "flex", gap: "4px" }}>
+              <button onClick={() => onPreview(task)} className="btn btn-sm" style={{
+                background: "linear-gradient(135deg, #3b82f61a, #2563eb1a)", border: "1px solid #2563eb44",
+                color: "#2563eb", fontSize: "10px", padding: "4px 8px",
+                borderRadius: "6px", cursor: "pointer", display: "flex", alignItems: "center", gap: "3px"
+              }}>
+                <Globe size={10} /> View Build
+              </button>
+              <button onClick={() => onPreview(task)} className="btn btn-sm" style={{
+                background: "var(--bg-hover)", border: "1px solid var(--border-primary)",
+                color: "var(--text-secondary)", fontSize: "10px", padding: "4px 8px",
+                borderRadius: "6px", cursor: "pointer", display: "flex", alignItems: "center", gap: "3px"
+              }}>
+                <Eye size={10} /> Output
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Projects({ onNavigateToDoc }) {
   const [projects, setProjects] = useState([]);
   const [selectedProj, setSelectedProj] = useState(null);
@@ -46,7 +150,7 @@ export default function Projects({ onNavigateToDoc }) {
   const [expandedStories, setExpandedStories] = useState({});
 
   // Editing state for Collaborative Backlog
-  const [editingItem, setEditingItem] = useState(null); // { type, id, data }
+  const [editingItem, setEditingItem] = useState(null);
   const [editTitle, setEditTitle] = useState("");
   const [editDesc, setEditDesc] = useState("");
   const [editPoints, setEditPoints] = useState(3);
@@ -56,14 +160,13 @@ export default function Projects({ onNavigateToDoc }) {
   // Pre-execution instruction override modal
   const [overrideTask, setOverrideTask] = useState(null);
   const [additionalInstructions, setAdditionalInstructions] = useState("");
-  const [isExecuting, setIsExecuting] = useState(false);
 
   // Simulated browser preview modal
   const [previewTask, setPreviewTask] = useState(null);
   const [previewOutput, setPreviewOutput] = useState("");
-  const [previewTab, setPreviewTab] = useState("app"); // app, code
+  const [previewTab, setPreviewTab] = useState("app");
 
-  // Task outputs
+  // Task execution loading states
   const [executingTasks, setExecutingTasks] = useState({});
 
   useEffect(() => { loadProjects(); }, []);
@@ -74,9 +177,8 @@ export default function Projects({ onNavigateToDoc }) {
       const list = await api.getProjects();
       setProjects(list);
       if (list.length > 0) {
-        // Maintain selection if possible, otherwise default to first
-        const active = selectedProj ? list.find(p => p.id === selectedProj.id) : null;
-        const target = active || list[0];
+        // Fallback to maintain selection if possible
+        const target = selectedProj ? (list.find(p => p.id === selectedProj.id) || list[0]) : list[0];
         setSelectedProj(target);
         loadFullProject(target.id);
       } else {
@@ -148,13 +250,11 @@ export default function Projects({ onNavigateToDoc }) {
     }
   };
 
-  // Open the instruction override form
   const openExecuteOverride = (task, assignee) => {
     setOverrideTask({ ...task, assignee });
     setAdditionalInstructions("");
   };
 
-  // Trigger execution with custom instructions
   const handleExecuteWithInstructions = async () => {
     if (!overrideTask) return;
     const taskId = overrideTask.id;
@@ -172,7 +272,6 @@ export default function Projects({ onNavigateToDoc }) {
     }
   };
 
-  // Collaborative editing submit handlers
   const handleStartEdit = (type, item) => {
     setEditingItem({ type, id: item.id, item });
     setEditTitle(item.title || "");
@@ -216,19 +315,9 @@ export default function Projects({ onNavigateToDoc }) {
     setter(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const totalTasks = fullProject?.epics?.reduce((sum, e) =>
-    sum + e.features?.reduce((s2, f) =>
-      s2 + f.stories?.reduce((s3, st) => s3 + (st.tasks?.length || 0), 0), 0), 0) || 0;
-
-  // Function to render mock running app code inside preview iframe
   const renderPreviewCode = () => {
     if (!previewOutput) return "<p style='color:#ccc;text-align:center;margin-top:40px'>No app code found</p>";
     
-    // Check if it's code block or JSON or text. Extract HTML/React components if present.
-    // If not, render it nicely formatted.
-    let codeStr = previewOutput;
-    
-    // Look for html blocks
     const htmlMatch = previewOutput.match(/```html\s*([\s\S]*?)```/i);
     const cssMatch = previewOutput.match(/```css\s*([\s\S]*?)```/i);
     const jsMatch = previewOutput.match(/```javascript\s*([\s\S]*?)```/i);
@@ -244,7 +333,6 @@ export default function Projects({ onNavigateToDoc }) {
       return finalHtml;
     }
 
-    // Default mock preview renderer for structured PM/Dev outputs
     return `
       <html>
         <head>
@@ -264,7 +352,7 @@ export default function Projects({ onNavigateToDoc }) {
             </div>
             <p><strong>Task Title:</strong> ${previewTask?.title}</p>
             <p><strong>Code / Output Review:</strong></p>
-            <div style="font-size:12px; line-height:1.6; color:#94a3b8; background:#0f172a; padding:12px; border-radius:6px; border:1px solid #334155; white-space:pre-wrap;">${codeStr}</div>
+            <div style="font-size:12px; line-height:1.6; color:#94a3b8; background:#0f172a; padding:12px; border-radius:6px; border:1px solid #334155; white-space:pre-wrap;">${previewOutput}</div>
           </div>
         </body>
       </html>
@@ -489,105 +577,17 @@ export default function Projects({ onNavigateToDoc }) {
                               {/* Tasks under Story */}
                               {expandedStories[story.id] && (
                                 <div style={{ marginLeft: "24px", marginTop: "4px" }}>
-                                  {story.tasks?.map(task => {
-                                    const isCurrentlyExecuting = !!executingTasks[task.id];
-                                    const [assignee, setAssignee] = useState(task.assignee || "Developer Agent");
-
-                                    const handleAssign = async (agentName) => {
-                                      setAssignee(agentName);
-                                      try { await api.assignTaskAgent(task.id, agentName); } catch (e) {}
-                                    };
-
-                                    return (
-                                      <div key={task.id} style={{
-                                        background: "var(--bg-card)", border: "1px solid var(--border-secondary)",
-                                        borderRadius: "8px", padding: "10px 14px", marginBottom: "6px"
-                                      }}>
-                                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                                          <div style={{ flex: 1, minWidth: 0 }}>
-                                            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                                              <span style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-primary)" }}>{task.title}</span>
-                                              <StatusBadge status={task.status} />
-                                            </div>
-                                            {task.description && (
-                                              <p style={{ fontSize: "11px", color: "var(--text-muted)", margin: "3px 0 0", lineHeight: "1.4" }}>
-                                                {task.description}
-                                              </p>
-                                            )}
-                                          </div>
-
-                                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                                            {/* Edit button */}
-                                            <button onClick={() => handleStartEdit("Task", task)} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "4px" }}>
-                                              <Edit3 size={11} />
-                                            </button>
-
-                                            {/* Assignee */}
-                                            <select
-                                              value={assignee}
-                                              onChange={e => handleAssign(e.target.value)}
-                                              style={{
-                                                fontSize: "10px", padding: "4px 6px", borderRadius: "6px",
-                                                background: "var(--bg-hover)", border: "1px solid var(--border-primary)",
-                                                color: "var(--text-secondary)", cursor: "pointer", minWidth: "120px"
-                                              }}
-                                            >
-                                              {AGENT_LIST.map(a => <option key={a} value={a}>{a}</option>)}
-                                            </select>
-
-                                            {/* Approve */}
-                                            {task.status === "Draft" && (
-                                              <button onClick={() => handleApproveItem("Task", task.id)} className="btn btn-sm" style={{
-                                                background: "#10b98122", border: "1px solid #10b98144", color: "#10b981",
-                                                fontSize: "10px", padding: "4px 8px", borderRadius: "6px", cursor: "pointer",
-                                                display: "flex", alignItems: "center", gap: "3px"
-                                              }}>
-                                                <ThumbsUp size={10} /> Approve
-                                              </button>
-                                            )}
-
-                                            {/* Execute Task (triggers pre-execution instructions drawer) */}
-                                            {(task.status === "Approved" || task.status === "Assigned" || task.status === "Draft") && (
-                                              <button
-                                                onClick={() => openExecuteOverride(task, assignee)}
-                                                disabled={isCurrentlyExecuting}
-                                                className="btn btn-sm"
-                                                style={{
-                                                  background: isCurrentlyExecuting ? "var(--bg-hover)" : "linear-gradient(135deg, #6366f1, #7c3aed)",
-                                                  border: "none", color: isCurrentlyExecuting ? "var(--text-muted)" : "#fff",
-                                                  fontSize: "10px", padding: "4px 10px", borderRadius: "6px",
-                                                  cursor: isCurrentlyExecuting ? "not-allowed" : "pointer",
-                                                  display: "flex", alignItems: "center", gap: "3px"
-                                                }}
-                                              >
-                                                {isCurrentlyExecuting ? <><RefreshCw size={10} style={{ animation: "spin 1s linear infinite" }} /> Running…</> : <><Play size={10} /> Execute</>}
-                                              </button>
-                                            )}
-
-                                            {/* View Build (Browser Preview) & output */}
-                                            {task.status === "Completed" && (
-                                              <div style={{ display: "flex", gap: "4px" }}>
-                                                <button onClick={() => openPreview(task)} className="btn btn-sm" style={{
-                                                  background: "linear-gradient(135deg, #3b82f61a, #2563eb1a)", border: "1px solid #2563eb44",
-                                                  color: "#2563eb", fontSize: "10px", padding: "4px 8px",
-                                                  borderRadius: "6px", cursor: "pointer", display: "flex", alignItems: "center", gap: "3px"
-                                                }}>
-                                                  <Globe size={10} /> View Build
-                                                </button>
-                                                <button onClick={() => openPreview(task)} className="btn btn-sm" style={{
-                                                  background: "var(--bg-hover)", border: "1px solid var(--border-primary)",
-                                                  color: "var(--text-secondary)", fontSize: "10px", padding: "4px 8px",
-                                                  borderRadius: "6px", cursor: "pointer", display: "flex", alignItems: "center", gap: "3px"
-                                                }}>
-                                                  <Eye size={10} /> Output
-                                                </button>
-                                              </div>
-                                            )}
-                                          </div>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
+                                  {story.tasks?.map(task => (
+                                    <ProjectTaskRow
+                                      key={task.id}
+                                      task={task}
+                                      onExecute={openExecuteOverride}
+                                      onApprove={(id) => handleApproveItem("Task", id)}
+                                      onPreview={openPreview}
+                                      onStartEdit={handleStartEdit}
+                                      isExecuting={!!executingTasks[task.id]}
+                                    />
+                                  ))}
                                 </div>
                               )}
                             </div>
