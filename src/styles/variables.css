@@ -1,0 +1,125 @@
+/* Theme variables */
+:root {
+  /* Fonts */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+
+  /* Spacing Grid (8px based) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Border Radii */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  /* Transitions */
+  --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Default Light Mode Colors */
+  --bg-app: #f9fafb;
+  --bg-sidebar: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f3f4f6;
+  --bg-panel: #f9fafb;
+  --bg-header: rgba(255, 255, 255, 0.8);
+  --bg-active: #f3f4f6;
+  --bg-hover: #f9fafb;
+  --bg-tooltip: #1f2937;
+
+  --border-primary: #e5e7eb;
+  --border-secondary: #f3f4f6;
+  --border-hover: #d1d5db;
+
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --text-muted: #9ca3af;
+  --text-inverse: #ffffff;
+
+  --primary-color: #6366f1;       /* Premium Indigo */
+  --primary-hover: #4f46e5;
+  --primary-light: #e0e7ff;
+  --primary-text: #4338ca;
+
+  --success-color: #10b981;       /* Emerald */
+  --success-light: #d1fae5;
+  --success-text: #065f46;
+
+  --warning-color: #f59e0b;       /* Amber */
+  --warning-light: #fef3c7;
+  --warning-text: #92400e;
+
+  --error-color: #ef4444;         /* Rose/Red */
+  --error-light: #fee2e2;
+  --error-text: #991b1b;
+
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.03);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.07), 0 10px 10px -5px rgba(0, 0, 0, 0.03);
+
+  --scrollbar-bg: #f1f1f1;
+  --scrollbar-thumb: #cdcdcd;
+  --scrollbar-thumb-hover: #a6a6a6;
+}
+
+/* Dark Mode Colors */
+.dark {
+  --bg-app: #030303;
+  --bg-sidebar: #09090b;
+  --bg-card: #09090b;
+  --bg-card-hover: #18181b;
+  --bg-panel: #09090b;
+  --bg-header: rgba(9, 9, 11, 0.85);
+  --bg-active: #18181b;
+  --bg-hover: #0f0f11;
+  --bg-tooltip: #f3f4f6;
+
+  --border-primary: #18181b;
+  --border-secondary: #0f0f11;
+  --border-hover: #27272a;
+
+  --text-primary: #f4f4f5;
+  --text-secondary: #a1a1aa;
+  --text-muted: #52525b;
+  --text-inverse: #09090b;
+
+  --primary-color: #818cf8;       /* Lighter Indigo for Dark Mode */
+  --primary-hover: #6366f1;
+  --primary-light: #1e1b4b;
+  --primary-text: #c7d2fe;
+
+  --success-color: #34d399;
+  --success-light: #064e3b;
+  --success-text: #a7f3d0;
+
+  --warning-color: #fbbf24;
+  --warning-light: #78350f;
+  --warning-text: #fde68a;
+
+  --error-color: #f87171;
+  --error-light: #7f1d1d;
+  --error-text: #fca5a5;
+
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.25);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.3);
+
+  --scrollbar-bg: #18181b;
+  --scrollbar-thumb: #27272a;
+  --scrollbar-thumb-hover: #3f3f46;
+}
