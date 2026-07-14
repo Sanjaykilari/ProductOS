@@ -43,16 +43,14 @@ router.get("/telemetry", async (req, res) => {
     const tasks = await dbAll(`SELECT * FROM tasks`);
     const queue = await dbAll(`SELECT * FROM execution_queue`);
     const alerts = await dbAll(`SELECT * FROM notifications ORDER BY created_at DESC LIMIT 10`);
+    const documents = await dbAll(`SELECT * FROM documents`);
 
-    // Calculations
     const taskCount = tasks.length;
     const completedTasks = tasks.filter(t => t.status === "Completed" || t.status === "Done").length;
     const activeTasks = tasks.filter(t => t.status === "Executing").length;
     const blockedTasks = tasks.filter(t => t.status === "Assigned").length;
-
     const completionRate = taskCount > 0 ? Math.round((completedTasks / taskCount) * 100) : 0;
     
-    // Workload calculation
     const workloadGroup = await dbAll(`
       SELECT assignee, COUNT(*) as count FROM tasks 
       WHERE status NOT IN ('Completed', 'Done')
@@ -64,6 +62,7 @@ router.get("/telemetry", async (req, res) => {
       epicCount: epics.length,
       featureCount: features.length,
       taskCount,
+      documentCount: documents.length,
       completedTasks,
       activeTasks,
       blockedTasks,
@@ -117,7 +116,73 @@ router.get("/projects", async (req, res) => {
   }
 });
 
-// 8. GET /api/orchestrator/tasks
+// 8. GET /api/orchestrator/epics
+router.get("/epics", async (req, res) => {
+  try {
+    const { projectId } = req.query;
+    let epics;
+    if (projectId) {
+      epics = await dbAll(`SELECT * FROM epics WHERE project_id = ? ORDER BY created_at`, [projectId]);
+    } else {
+      epics = await dbAll(`SELECT * FROM epics ORDER BY created_at DESC`);
+    }
+    res.json(epics);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 9. GET /api/orchestrator/features
+router.get("/features", async (req, res) => {
+  try {
+    const { epicId } = req.query;
+    let features;
+    if (epicId) {
+      features = await dbAll(`SELECT * FROM features WHERE epic_id = ? ORDER BY created_at`, [epicId]);
+    } else {
+      features = await dbAll(`SELECT * FROM features ORDER BY created_at DESC`);
+    }
+    res.json(features);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 10. GET /api/orchestrator/stories
+router.get("/stories", async (req, res) => {
+  try {
+    const { featureId } = req.query;
+    let stories;
+    if (featureId) {
+      stories = await dbAll(`SELECT * FROM stories WHERE feature_id = ? ORDER BY created_at`, [featureId]);
+    } else {
+      stories = await dbAll(`SELECT * FROM stories ORDER BY created_at DESC`);
+    }
+    res.json(stories);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 11. GET /api/orchestrator/documents
+router.get("/documents", async (req, res) => {
+  try {
+    const { projectId, linkedItemId } = req.query;
+    let docs;
+    if (linkedItemId) {
+      docs = await dbAll(`SELECT * FROM documents WHERE linked_item_id = ? ORDER BY created_at`, [linkedItemId]);
+    } else if (projectId) {
+      docs = await dbAll(`SELECT * FROM documents WHERE project_id = ? ORDER BY created_at`, [projectId]);
+    } else {
+      docs = await dbAll(`SELECT * FROM documents ORDER BY created_at DESC`);
+    }
+    res.json(docs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 12. GET /api/orchestrator/tasks
 router.get("/tasks", async (req, res) => {
   try {
     const { projectId } = req.query;
@@ -141,7 +206,7 @@ router.get("/tasks", async (req, res) => {
   }
 });
 
-// 9. POST /api/orchestrator/tasks
+// 13. POST /api/orchestrator/tasks
 router.post("/tasks", async (req, res) => {
   try {
     const { title, description, points, assignee, status = "Draft" } = req.body;
@@ -162,7 +227,7 @@ router.post("/tasks", async (req, res) => {
   }
 });
 
-// 10. POST /api/orchestrator/tasks/update-status
+// 14. POST /api/orchestrator/tasks/update-status
 router.post("/tasks/update-status", async (req, res) => {
   try {
     const { taskId, status } = req.body;
@@ -176,6 +241,73 @@ router.post("/tasks/update-status", async (req, res) => {
     }
     
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 15. POST /api/orchestrator/tasks/:id/assign — assign agent to task
+router.post("/tasks/:id/assign", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { agentName } = req.body;
+    if (!agentName) return res.status(400).json({ error: "Missing agentName" });
+
+    await dbRun(`UPDATE tasks SET assignee = ? WHERE id = ?`, [agentName, id]);
+    try {
+      await dbRun(`
+        INSERT OR REPLACE INTO agent_task_assignments (task_id, agent_name, status)
+        VALUES (?, ?, 'Assigned')
+      `, [id, agentName]);
+    } catch (e) { /* ignore */ }
+
+    res.json({ success: true, taskId: id, agentName });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 16. POST /api/orchestrator/tasks/:id/execute — trigger agent execution
+router.post("/tasks/:id/execute", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { agentName } = req.body; // optional override
+
+    const result = await agentFramework.executeTaskById(id, agentName || null);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 17. GET /api/orchestrator/tasks/:id/output — get agent output for task
+router.get("/tasks/:id/output", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const outputs = await dbAll(`SELECT * FROM agent_outputs WHERE task_id = ? ORDER BY created_at DESC`, [id]);
+    res.json(outputs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 18. GET /api/orchestrator/project/:id/full — full project tree
+router.get("/project/:id/full", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const fullProject = await orchestrator.getProjectFull(id);
+    res.json(fullProject);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 19. POST /api/orchestrator/approve-all/:projectId — bulk approve
+router.post("/approve-all/:projectId", async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const result = await orchestrator.approveAllInProject(projectId);
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

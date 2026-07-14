@@ -45,7 +45,7 @@ export const api = {
     }).catch(onError);
   },
 
-  // ─── Orchestrator ──────────────────────────────────────────────────
+  // ─── Orchestrator: Project Initiation ─────────────────────────────
   async initiateProject(idea) {
     const res = await fetch(`${BASE_URL}/api/orchestrator/initiate`, {
       method: "POST",
@@ -63,6 +63,14 @@ export const api = {
       body: JSON.stringify({ itemType, itemId }),
     });
     if (!res.ok) throw new Error((await res.json()).error || "Approval failed");
+    return res.json();
+  },
+
+  async approveAll(projectId) {
+    const res = await fetch(`${BASE_URL}/api/orchestrator/approve-all/${encodeURIComponent(projectId)}`, {
+      method: "POST",
+    });
+    if (!res.ok) throw new Error((await res.json()).error || "Bulk approval failed");
     return res.json();
   },
 
@@ -107,12 +115,55 @@ export const api = {
     return res.json();
   },
 
-  // ─── Workspace Projects / Tasks ───────────────────────────────────
+  // ─── Workspace: Projects ──────────────────────────────────────────
   async getProjects() {
     const res = await fetch(`${BASE_URL}/api/orchestrator/projects`);
     return res.json();
   },
 
+  async getProjectFull(projectId) {
+    const res = await fetch(`${BASE_URL}/api/orchestrator/project/${encodeURIComponent(projectId)}/full`);
+    if (!res.ok) throw new Error((await res.json()).error || "Failed to load project");
+    return res.json();
+  },
+
+  // ─── Workspace: Epics / Features / Stories ────────────────────────
+  async getEpics(projectId = null) {
+    const url = projectId
+      ? `${BASE_URL}/api/orchestrator/epics?projectId=${encodeURIComponent(projectId)}`
+      : `${BASE_URL}/api/orchestrator/epics`;
+    const res = await fetch(url);
+    return res.json();
+  },
+
+  async getFeatures(epicId = null) {
+    const url = epicId
+      ? `${BASE_URL}/api/orchestrator/features?epicId=${encodeURIComponent(epicId)}`
+      : `${BASE_URL}/api/orchestrator/features`;
+    const res = await fetch(url);
+    return res.json();
+  },
+
+  async getStories(featureId = null) {
+    const url = featureId
+      ? `${BASE_URL}/api/orchestrator/stories?featureId=${encodeURIComponent(featureId)}`
+      : `${BASE_URL}/api/orchestrator/stories`;
+    const res = await fetch(url);
+    return res.json();
+  },
+
+  // ─── Workspace: Documents ─────────────────────────────────────────
+  async getDocuments(projectId = null, linkedItemId = null) {
+    let url = `${BASE_URL}/api/orchestrator/documents`;
+    const params = [];
+    if (projectId) params.push(`projectId=${encodeURIComponent(projectId)}`);
+    if (linkedItemId) params.push(`linkedItemId=${encodeURIComponent(linkedItemId)}`);
+    if (params.length) url += `?${params.join("&")}`;
+    const res = await fetch(url);
+    return res.json();
+  },
+
+  // ─── Workspace: Tasks ─────────────────────────────────────────────
   async getTasks(projectId = null) {
     const url = projectId 
       ? `${BASE_URL}/api/orchestrator/tasks?projectId=${encodeURIComponent(projectId)}`
@@ -138,6 +189,32 @@ export const api = {
       body: JSON.stringify({ taskId, status }),
     });
     if (!res.ok) throw new Error((await res.json()).error || "Failed to update status");
+    return res.json();
+  },
+
+  // ─── Agent Assignment & Execution ─────────────────────────────────
+  async assignTaskAgent(taskId, agentName) {
+    const res = await fetch(`${BASE_URL}/api/orchestrator/tasks/${encodeURIComponent(taskId)}/assign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agentName }),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || "Assignment failed");
+    return res.json();
+  },
+
+  async executeTask(taskId, agentName = null) {
+    const res = await fetch(`${BASE_URL}/api/orchestrator/tasks/${encodeURIComponent(taskId)}/execute`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agentName }),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || "Execution failed");
+    return res.json();
+  },
+
+  async getTaskOutput(taskId) {
+    const res = await fetch(`${BASE_URL}/api/orchestrator/tasks/${encodeURIComponent(taskId)}/output`);
     return res.json();
   },
 };

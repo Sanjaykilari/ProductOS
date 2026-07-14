@@ -1,25 +1,28 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
-  Sparkles, Send, Mic, Bot, User, Zap, Plus, ChevronDown,
-  CheckCircle, Clock, AlertCircle, RefreshCw, X, Copy, ThumbsUp,
-  Layers, Code, Shield, Cpu
+  Sparkles, Send, Bot, User, Zap, ChevronDown,
+  CheckCircle, Clock, RefreshCw, X, Copy,
+  Layers, Code, Shield, Cpu, Check, Users as UsersIcon,
+  FileText, Database, Paintbrush, Bug, Rocket, BookOpen, Search
 } from "lucide-react";
 import api from "../lib/api";
 
 const AGENT_OPTIONS = [
-  { id: "PM Agent",            label: "PM Agent",            icon: Layers,  color: "#6366f1", desc: "PRDs, Roadmaps, Epics, Stories" },
-  { id: "Developer Agent",     label: "Developer Agent",     icon: Code,    color: "#10b981", desc: "Code, Refactor, Debug, Review" },
-  { id: "Architecture Agent",  label: "Architecture Agent",  icon: Cpu,     color: "#f59e0b", desc: "System Design, Tech Stack" },
-  { id: "Security Agent",      label: "Security Agent",      icon: Shield,  color: "#ef4444", desc: "OWASP, Auth, Compliance" },
-  { id: "QA Agent",            label: "QA Agent",            icon: CheckCircle, color: "#8b5cf6", desc: "Tests, Regression, Quality" },
-  { id: "Research Agent",      label: "Research Agent",      icon: Sparkles, color: "#06b6d4", desc: "Market, APIs, Best Practices" },
-  { id: "Backend Agent",       label: "Backend Agent",       icon: Code,    color: "#84cc16", desc: "APIs, Services, Business Logic" },
-  { id: "Frontend Agent",      label: "Frontend Agent",      icon: Code,    color: "#f97316", desc: "UI Components, Pages, Layouts" },
-  { id: "DevOps Agent",        label: "DevOps Agent",        icon: Zap,     color: "#ec4899", desc: "CI/CD, Docker, Cloud, Deploy" },
-  { id: "Database Agent",      label: "Database Agent",      icon: Layers,  color: "#14b8a6", desc: "Schema, Indexes, Migrations" },
-  { id: "Documentation Agent", label: "Documentation Agent", icon: Layers,  color: "#a78bfa", desc: "API Docs, Wiki, Release Notes" },
-  { id: "Business Analyst Agent", label: "BA Agent",         icon: Layers,  color: "#fb923c", desc: "Requirements, Process, Rules" },
+  { id: "PM Agent",            label: "PM Agent",            icon: Layers,     color: "#6366f1", desc: "PRDs, Roadmaps, Epics, Stories", category: "Product" },
+  { id: "Research Agent",      label: "Research Agent",      icon: Search,     color: "#06b6d4", desc: "Market, APIs, Best Practices", category: "Product" },
+  { id: "Architecture Agent",  label: "Architecture Agent",  icon: Cpu,        color: "#f59e0b", desc: "System Design, Tech Stack", category: "Engineering" },
+  { id: "Developer Agent",     label: "Developer Agent",     icon: Code,       color: "#10b981", desc: "Code, Refactor, Debug, Review", category: "Engineering" },
+  { id: "Frontend Agent",      label: "Frontend Agent",      icon: Paintbrush, color: "#f97316", desc: "UI Components, Pages, Layouts", category: "Engineering" },
+  { id: "Backend Agent",       label: "Backend Agent",       icon: Code,       color: "#84cc16", desc: "APIs, Services, Business Logic", category: "Engineering" },
+  { id: "Database Agent",      label: "Database Agent",      icon: Database,   color: "#14b8a6", desc: "Schema, Indexes, Migrations", category: "Engineering" },
+  { id: "UI Agent",            label: "UI/UX Agent",         icon: Paintbrush, color: "#e879f9", desc: "Design Tokens, Wireframes", category: "Engineering" },
+  { id: "QA Agent",            label: "QA Agent",            icon: Bug,        color: "#8b5cf6", desc: "Tests, Regression, Quality", category: "Quality" },
+  { id: "Security Agent",      label: "Security Agent",      icon: Shield,     color: "#ef4444", desc: "OWASP, Auth, Compliance", category: "Quality" },
+  { id: "DevOps Agent",        label: "DevOps Agent",        icon: Rocket,     color: "#ec4899", desc: "CI/CD, Docker, Cloud, Deploy", category: "Operations" },
+  { id: "Documentation Agent", label: "Doc Agent",           icon: BookOpen,   color: "#a78bfa", desc: "API Docs, Wiki, Release Notes", category: "Operations" },
 ];
+
+const CATEGORIES = ["Product", "Engineering", "Quality", "Operations"];
 
 const BUILD_PROMPTS = [
   "Build me a SaaS product management tool",
@@ -115,7 +118,7 @@ function MessageBubble({ msg, onCopy }) {
               <br />Project ID: <code style={{ fontSize: "11px", background: "var(--bg-active)", padding: "2px 5px", borderRadius: "4px" }}>{msg.projectResult.projectId}</code>
             </div>
             <div style={{ marginTop: "8px", display: "flex", gap: "6px", flexWrap: "wrap" }}>
-              {["Epics", "Features", "Stories", "Tasks"].map(t => (
+              {["Epics", "Features", "Stories", "Tasks", "Documents"].map(t => (
                 <span key={t} style={{
                   fontSize: "11px", padding: "2px 8px", borderRadius: "999px",
                   background: "var(--primary-color)22", color: "var(--primary-color)", fontWeight: "600"
@@ -147,25 +150,23 @@ export default function AIChat() {
     {
       id: 1, sender: "assistant", agent: "ProductOS AI",
       agentColor: "#6366f1",
-      text: "👋 Welcome to the AI Command Room!\n\nI'm your intelligent workspace. You can:\n• Ask me to **build anything** — I'll generate a full project backlog\n• Chat with specific **@agents** for specialized help\n• Use suggested prompts below to get started instantly\n\nTry: \"Build me a SaaS analytics dashboard\"",
+      text: "👋 Welcome to the AI Command Room!\n\nI'm your intelligent workspace. You can:\n• Ask me to **build anything** — I'll generate a full project backlog with documents\n• Select **multiple agents** to get perspectives from different specialists\n• Use suggested prompts below to get started instantly\n\nTry: \"Build me a SaaS analytics dashboard\"",
       time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     }
   ]);
   const [input, setInput] = useState("");
-  const [selectedAgent, setSelectedAgent] = useState(AGENT_OPTIONS[0]);
-  const [agentDropOpen, setAgentDropOpen] = useState(false);
+  const [selectedAgents, setSelectedAgents] = useState([AGENT_OPTIONS[0]]);
+  const [agentPanelOpen, setAgentPanelOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [telemetry, setTelemetry] = useState(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const conversationId = useRef(`conv-${Date.now()}`);
 
-  // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Load live telemetry
   useEffect(() => {
     api.getTelemetry().then(setTelemetry).catch(() => {});
     const interval = setInterval(() => api.getTelemetry().then(setTelemetry).catch(() => {}), 15000);
@@ -176,18 +177,21 @@ export default function AIChat() {
     setMessages(prev => [...prev, { id: Date.now() + Math.random(), ...msg }]);
   };
 
-  const updateLastAssistantMessage = useCallback((updater) => {
-    setMessages(prev => {
-      const msgs = [...prev];
-      for (let i = msgs.length - 1; i >= 0; i--) {
-        if (msgs[i].sender === "assistant") {
-          msgs[i] = typeof updater === "function" ? updater(msgs[i]) : { ...msgs[i], ...updater };
-          break;
-        }
+  // Agent multi-select toggle
+  const toggleAgent = (agent) => {
+    setSelectedAgents(prev => {
+      const exists = prev.find(a => a.id === agent.id);
+      if (exists) {
+        // Don't allow zero agents
+        if (prev.length === 1) return prev;
+        return prev.filter(a => a.id !== agent.id);
       }
-      return msgs;
+      return [...prev, agent];
     });
-  }, []);
+  };
+
+  const selectAll = () => setSelectedAgents([...AGENT_OPTIONS]);
+  const selectNone = () => setSelectedAgents([AGENT_OPTIONS[0]]);
 
   const handleSend = async () => {
     const text = input.trim();
@@ -196,23 +200,20 @@ export default function AIChat() {
     setInput("");
     setIsLoading(true);
 
-    // Add user message
     const userMsg = {
       id: Date.now(), sender: "user", text,
       time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     };
     setMessages(prev => [...prev, userMsg]);
 
-    // Detect "build" intent — use orchestrator
     const isBuildIntent = /\b(build|create|generate|make|design|develop|scaffold)\b/i.test(text);
 
     if (isBuildIntent) {
-      // Show thinking bubble
       const thinkId = Date.now() + 1;
       setMessages(prev => [...prev, {
         id: thinkId, sender: "assistant",
         agent: "PM Agent", agentColor: "#6366f1",
-        text: "🧠 Analyzing your idea and spinning up the AI Product Team…",
+        text: "🧠 Analyzing your idea and spinning up the AI Product Team…\nGenerating Projects, Epics, Features, Stories, Tasks, and Documents…",
         streaming: false,
         time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
       }]);
@@ -220,19 +221,17 @@ export default function AIChat() {
       try {
         const result = await api.initiateProject(text);
 
-        // Replace thinking bubble with real result
         setMessages(prev => prev.map(m => m.id === thinkId ? {
           ...m,
-          text: `✅ Your project has been structured and queued for approval!\n\nThe PM Agent analyzed your idea and generated:\n• Full project roadmap\n• Epics, Features & User Stories\n• Tasks with dependencies\n• Agent assignments\n\nHead to **Projects** to review and approve your backlog.`,
+          text: `✅ Your project has been structured and queued for approval!\n\nThe PM Agent analyzed your idea and generated:\n• Full project roadmap\n• Epics, Features & User Stories\n• Tasks with dependencies & agent assignments\n• PRD, Technical Spec & Epic Brief documents\n\nHead to **Projects** to review, approve, and execute!`,
           streaming: false,
           projectResult: { title: result.title, projectId: result.projectId }
         } : m));
 
-        // Follow-up from agent
         setTimeout(() => {
           addMessage({
             sender: "assistant", agent: "PM Agent", agentColor: "#6366f1",
-            text: `📋 Next steps:\n1. Go to **Projects** → find "${result.title}"\n2. Review the generated Epics & Tasks\n3. Click **Approve** on each artifact\n4. Agents will automatically begin execution!`,
+            text: `📋 Next steps:\n1. Go to **Projects** → find "${result.title}"\n2. Review the generated Epics, Tasks & Documents\n3. Click **Approve All** to approve the entire project\n4. Click **Execute** on individual tasks to run agents!`,
             time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
           });
         }, 800);
@@ -243,44 +242,48 @@ export default function AIChat() {
           streaming: false
         } : m));
       }
-
     } else {
-      // Regular chat — use streaming
-      const streamMsgId = Date.now() + 1;
-      setMessages(prev => [...prev, {
-        id: streamMsgId, sender: "assistant",
-        agent: selectedAgent.label, agentColor: selectedAgent.color,
-        text: "", streaming: true,
-        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-      }]);
+      // Send to all selected agents sequentially
+      for (let i = 0; i < selectedAgents.length; i++) {
+        const agent = selectedAgents[i];
+        const streamMsgId = Date.now() + i + 1;
 
-      let accumulated = "";
+        setMessages(prev => [...prev, {
+          id: streamMsgId, sender: "assistant",
+          agent: agent.label, agentColor: agent.color,
+          text: "", streaming: true,
+          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        }]);
 
-      api.streamChat(
-        { prompt: text, agentId: selectedAgent.id, conversationId: conversationId.current },
-        (chunk) => {
-          accumulated += chunk;
-          setMessages(prev => prev.map(m => m.id === streamMsgId
-            ? { ...m, text: accumulated }
-            : m
-          ));
-        },
-        (fullText) => {
-          setMessages(prev => prev.map(m => m.id === streamMsgId
-            ? { ...m, text: fullText || accumulated, streaming: false }
-            : m
-          ));
-          setIsLoading(false);
-        },
-        (err) => {
-          setMessages(prev => prev.map(m => m.id === streamMsgId
-            ? { ...m, text: `⚠️ ${err}`, streaming: false }
-            : m
-          ));
-          setIsLoading(false);
-        }
-      );
-      return; // don't setIsLoading(false) yet — streaming handles it
+        let accumulated = "";
+
+        await new Promise((resolve) => {
+          api.streamChat(
+            { prompt: text, agentId: agent.id, conversationId: conversationId.current },
+            (chunk) => {
+              accumulated += chunk;
+              setMessages(prev => prev.map(m => m.id === streamMsgId
+                ? { ...m, text: accumulated }
+                : m
+              ));
+            },
+            (fullText) => {
+              setMessages(prev => prev.map(m => m.id === streamMsgId
+                ? { ...m, text: fullText || accumulated, streaming: false }
+                : m
+              ));
+              resolve();
+            },
+            (err) => {
+              setMessages(prev => prev.map(m => m.id === streamMsgId
+                ? { ...m, text: `⚠️ ${err}`, streaming: false }
+                : m
+              ));
+              resolve();
+            }
+          );
+        });
+      }
     }
 
     setIsLoading(false);
@@ -289,8 +292,6 @@ export default function AIChat() {
   const handleCopy = (text) => {
     navigator.clipboard.writeText(text).catch(() => {});
   };
-
-  const AgentIcon = selectedAgent.icon;
 
   return (
     <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 96px)", gap: 0 }}>
@@ -312,6 +313,7 @@ export default function AIChat() {
           {[
             { label: "Projects", value: telemetry.projectCount, color: "#6366f1" },
             { label: "Tasks", value: telemetry.taskCount, color: "#10b981" },
+            { label: "Docs", value: telemetry.documentCount || 0, color: "#a78bfa" },
             { label: "Completed", value: `${telemetry.completionRate}%`, color: "#f59e0b" },
             { label: "Active", value: telemetry.activeTasks, color: "#ef4444" },
           ].map(s => (
@@ -360,6 +362,40 @@ export default function AIChat() {
           <div ref={messagesEndRef} />
         </div>
 
+        {/* ─── Selected Agents Pills Bar ────────────────────────────── */}
+        <div style={{
+          padding: "8px 20px",
+          background: "var(--bg-hover)",
+          borderTop: "1px solid var(--border-secondary)",
+          display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center"
+        }}>
+          <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginRight: "4px" }}>
+            Active Agents:
+          </span>
+          {selectedAgents.map(ag => {
+            const Icon = ag.icon;
+            return (
+              <div key={ag.id} style={{
+                display: "inline-flex", alignItems: "center", gap: "4px",
+                padding: "3px 8px", borderRadius: "999px",
+                background: `${ag.color}18`, border: `1px solid ${ag.color}44`,
+                fontSize: "11px", fontWeight: "600", color: ag.color,
+              }}>
+                <Icon size={10} />
+                {ag.label}
+                {selectedAgents.length > 1 && (
+                  <button
+                    onClick={() => toggleAgent(ag)}
+                    style={{ background: "none", border: "none", cursor: "pointer", color: ag.color, padding: 0, display: "flex", marginLeft: "2px" }}
+                  >
+                    <X size={10} />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
         {/* Suggested build prompts */}
         <div style={{
           padding: "10px 20px",
@@ -390,60 +426,110 @@ export default function AIChat() {
         {/* Input row */}
         <div style={{ padding: "14px 20px", borderTop: "1px solid var(--border-primary)" }}>
           <div style={{ display: "flex", gap: "8px", alignItems: "flex-end" }}>
-            {/* Agent selector */}
+            {/* Agent selector button */}
             <div style={{ position: "relative" }}>
               <button
-                onClick={() => setAgentDropOpen(o => !o)}
+                onClick={() => setAgentPanelOpen(o => !o)}
                 style={{
                   display: "flex", alignItems: "center", gap: "6px",
-                  background: `${selectedAgent.color}18`, border: `1px solid ${selectedAgent.color}44`,
+                  background: selectedAgents.length > 1 
+                    ? "linear-gradient(135deg, #6366f118, #10b98118)" 
+                    : `${selectedAgents[0].color}18`,
+                  border: selectedAgents.length > 1 
+                    ? "1px solid #6366f144" 
+                    : `1px solid ${selectedAgents[0].color}44`,
                   borderRadius: "10px", padding: "8px 10px", cursor: "pointer",
-                  color: selectedAgent.color, fontSize: "12px", fontWeight: "600",
+                  color: selectedAgents.length > 1 ? "#6366f1" : selectedAgents[0].color,
+                  fontSize: "12px", fontWeight: "600",
                   whiteSpace: "nowrap", transition: "all 0.15s"
                 }}
               >
-                <AgentIcon size={13} />
-                {selectedAgent.label}
+                <UsersIcon size={13} />
+                {selectedAgents.length === 1 ? selectedAgents[0].label : `${selectedAgents.length} Agents`}
                 <ChevronDown size={11} style={{ opacity: 0.6 }} />
               </button>
 
-              {agentDropOpen && (
+              {/* ─── Multi-agent selector panel ─── */}
+              {agentPanelOpen && (
                 <div style={{
                   position: "absolute", bottom: "100%", left: 0, marginBottom: "6px",
                   background: "var(--bg-card)", border: "1px solid var(--border-primary)",
                   borderRadius: "12px", boxShadow: "var(--shadow-xl)",
-                  width: "220px", overflow: "hidden", zIndex: 100,
-                  animation: "fadeSlideIn 0.15s ease"
+                  width: "280px", maxHeight: "400px", overflowY: "auto",
+                  zIndex: 100, animation: "fadeSlideIn 0.15s ease"
                 }}>
-                  {AGENT_OPTIONS.map(ag => {
-                    const Icon = ag.icon;
-                    return (
-                      <button key={ag.id}
-                        onClick={() => { setSelectedAgent(ag); setAgentDropOpen(false); }}
-                        style={{
-                          display: "flex", alignItems: "flex-start", gap: "10px",
-                          width: "100%", padding: "10px 14px", background: "none",
-                          border: "none", cursor: "pointer", textAlign: "left",
-                          borderBottom: "1px solid var(--border-secondary)",
-                          transition: "background 0.1s"
-                        }}
-                        onMouseEnter={e => e.currentTarget.style.background = "var(--bg-hover)"}
-                        onMouseLeave={e => e.currentTarget.style.background = "none"}
-                      >
-                        <div style={{
-                          width: "28px", height: "28px", borderRadius: "8px",
-                          background: `${ag.color}20`, display: "flex", alignItems: "center",
-                          justifyContent: "center", flexShrink: 0
-                        }}>
-                          <Icon size={13} color={ag.color} />
-                        </div>
-                        <div>
-                          <div style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-primary)" }}>{ag.label}</div>
-                          <div style={{ fontSize: "10px", color: "var(--text-muted)", marginTop: "1px" }}>{ag.desc}</div>
-                        </div>
-                      </button>
-                    );
-                  })}
+                  {/* Panel header */}
+                  <div style={{
+                    padding: "10px 14px", borderBottom: "1px solid var(--border-secondary)",
+                    display: "flex", justifyContent: "space-between", alignItems: "center"
+                  }}>
+                    <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-primary)" }}>
+                      Select Agents ({selectedAgents.length})
+                    </span>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button onClick={selectAll} style={{
+                        background: "none", border: "none", cursor: "pointer",
+                        fontSize: "10px", fontWeight: "600", color: "var(--primary-color)"
+                      }}>All</button>
+                      <button onClick={selectNone} style={{
+                        background: "none", border: "none", cursor: "pointer",
+                        fontSize: "10px", fontWeight: "600", color: "var(--text-muted)"
+                      }}>Reset</button>
+                    </div>
+                  </div>
+
+                  {/* Category groups */}
+                  {CATEGORIES.map(cat => (
+                    <div key={cat}>
+                      <div style={{
+                        padding: "6px 14px", fontSize: "9px", fontWeight: "700",
+                        color: "var(--text-muted)", textTransform: "uppercase",
+                        letterSpacing: "0.08em", background: "var(--bg-hover)"
+                      }}>
+                        {cat}
+                      </div>
+                      {AGENT_OPTIONS.filter(a => a.category === cat).map(ag => {
+                        const Icon = ag.icon;
+                        const isSelected = selectedAgents.some(a => a.id === ag.id);
+                        return (
+                          <button key={ag.id}
+                            onClick={() => toggleAgent(ag)}
+                            style={{
+                              display: "flex", alignItems: "center", gap: "10px",
+                              width: "100%", padding: "8px 14px", background: "none",
+                              border: "none", cursor: "pointer", textAlign: "left",
+                              borderBottom: "1px solid var(--border-secondary)",
+                              transition: "background 0.1s"
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.background = "var(--bg-hover)"}
+                            onMouseLeave={e => e.currentTarget.style.background = "none"}
+                          >
+                            {/* Checkbox */}
+                            <div style={{
+                              width: "18px", height: "18px", borderRadius: "4px",
+                              border: isSelected ? `2px solid ${ag.color}` : "2px solid var(--border-primary)",
+                              background: isSelected ? `${ag.color}` : "transparent",
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                              flexShrink: 0, transition: "all 0.15s"
+                            }}>
+                              {isSelected && <Check size={11} color="#fff" strokeWidth={3} />}
+                            </div>
+                            <div style={{
+                              width: "26px", height: "26px", borderRadius: "6px",
+                              background: `${ag.color}20`, display: "flex", alignItems: "center",
+                              justifyContent: "center", flexShrink: 0
+                            }}>
+                              <Icon size={12} color={ag.color} />
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-primary)" }}>{ag.label}</div>
+                              <div style={{ fontSize: "10px", color: "var(--text-muted)", marginTop: "1px" }}>{ag.desc}</div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -454,13 +540,11 @@ export default function AIChat() {
               background: "var(--bg-app)", border: "1px solid var(--border-primary)",
               borderRadius: "12px", padding: "8px 14px", gap: "8px",
               transition: "border 0.15s"
-            }}
-              onFocus={() => {}} // handled by input
-            >
+            }}>
               <input
                 ref={inputRef}
                 type="text"
-                placeholder={`Ask ${selectedAgent.label}… or "Build me a [product]" to generate a full project`}
+                placeholder={`Ask ${selectedAgents.length === 1 ? selectedAgents[0].label : `${selectedAgents.length} agents`}… or "Build me a [product]"`}
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
@@ -495,7 +579,7 @@ export default function AIChat() {
           </div>
 
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: "8px", fontSize: "10px", color: "var(--text-muted)" }}>
-            <span>Press <kbd style={{ background: "var(--bg-hover)", padding: "1px 4px", borderRadius: "3px", fontSize: "9px" }}>Enter</kbd> to send • Agent: {selectedAgent.label} • Model: DeepSeek V3</span>
+            <span>Press <kbd style={{ background: "var(--bg-hover)", padding: "1px 4px", borderRadius: "3px", fontSize: "9px" }}>Enter</kbd> to send • {selectedAgents.length} agent{selectedAgents.length !== 1 ? "s" : ""} selected • Model: DeepSeek V3</span>
             <span style={{ color: "#10b981" }}>● Connected to backend</span>
           </div>
         </div>
@@ -507,7 +591,8 @@ export default function AIChat() {
         @keyframes bounce { 0%,80%,100% { transform:translateY(0); } 40% { transform:translateY(-6px); } }
         @keyframes spin { to { transform:rotate(360deg); } }
         @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
-      `}</style>
+      `}
+      </style>
     </div>
   );
 }

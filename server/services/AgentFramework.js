@@ -1,5 +1,5 @@
 import { BaseAgent } from "./BaseAgent.js";
-import { dbAll } from "../db/database.js";
+import { dbAll, dbGet, dbRun } from "../db/database.js";
 import { eventBus } from "./EventBus.js";
 
 class AgentRegistry {
@@ -147,6 +147,41 @@ class AgentRegistry {
     return await dbAll(`SELECT * FROM agent_states`);
   }
 
+  // Execute a task by its ID — loads task from DB and runs the full agent contract
+  async executeTaskById(taskId, agentName) {
+    const task = await dbGet(`SELECT * FROM tasks WHERE id = ?`, [taskId]);
+    if (!task) throw new Error(`Task [${taskId}] not found in database.`);
+
+    // Ensure agent assignment
+    if (agentName) {
+      await dbRun(`UPDATE tasks SET assignee = ? WHERE id = ?`, [agentName, taskId]);
+      try {
+        await dbRun(`
+          INSERT OR REPLACE INTO agent_task_assignments (task_id, agent_name, status)
+          VALUES (?, ?, 'Executing')
+        `, [taskId, agentName]);
+      } catch (e) { /* ignore duplicate */ }
+    }
+
+    const effectiveAgent = agentName || task.assignee || "Developer Agent";
+
+    // Update status to Executing
+    await dbRun(`UPDATE tasks SET status = 'Executing' WHERE id = ?`, [taskId]);
+    eventBus.publish("TaskStatusChanged", { taskId, status: "Executing" });
+
+    // Run the agent task
+    await this.runAgentTask(effectiveAgent, { ...task, id: taskId });
+
+    // Mark completed
+    await dbRun(`UPDATE tasks SET status = 'Completed' WHERE id = ?`, [taskId]);
+    eventBus.publish("TaskCompleted", { taskId, agentId: effectiveAgent });
+    eventBus.publish("TaskStatusChanged", { taskId, status: "Completed" });
+
+    // Return the output
+    const output = await dbGet(`SELECT * FROM agent_outputs WHERE task_id = ? ORDER BY created_at DESC LIMIT 1`, [taskId]);
+    return { taskId, agentName: effectiveAgent, output };
+  }
+
   // Execute an AI employee agent task conforming to contract
   async runAgentTask(agentName, task, simulateFailure = false) {
     const agent = this.agents[agentName];
@@ -155,7 +190,20 @@ class AgentRegistry {
     }
 
     const workspaceId = "workspace-1";
-    const projectId = "proj-analytics";
+    // Try to resolve the project ID from the task hierarchy
+    let projectId = "proj-analytics";
+    try {
+      if (task.story_id) {
+        const story = await dbGet(`SELECT feature_id FROM stories WHERE id = ?`, [task.story_id]);
+        if (story) {
+          const feat = await dbGet(`SELECT epic_id FROM features WHERE id = ?`, [story.feature_id]);
+          if (feat) {
+            const epic = await dbGet(`SELECT project_id FROM epics WHERE id = ?`, [feat.epic_id]);
+            if (epic) projectId = epic.project_id;
+          }
+        }
+      }
+    } catch (e) { /* use default */ }
 
     try {
       // 1. Initialize State
@@ -169,7 +217,7 @@ class AgentRegistry {
 
       // 4. Plan Work
       await agent.planWork(task);
-      await new Promise(r => setTimeout(r, 600)); // Sim structural plan
+      await new Promise(r => setTimeout(r, 600));
 
       // 5. Execute reasoning via AIService (triggers real DeepSeek API call)
       const rawResponse = await agent.execute(task, context);
@@ -189,10 +237,8 @@ class AgentRegistry {
 
     } catch (err) {
       console.error(`[AgentFramework] Fatal exception during ${agentName} execution:`, err.message);
-      // Reset agent to failed state
       await agent.complete(task, { structuredOutput: `Execution error: ${err.message}` });
       
-      // Update DB to Failed
       await dbRun(`
         UPDATE agent_states
         SET status = 'Failed', cpu = 0, last_active = CURRENT_TIMESTAMP
@@ -200,7 +246,7 @@ class AgentRegistry {
       `, [agentName]);
 
       eventBus.publish("AgentFailed", { agentName, taskId: task.id, error: err.message });
-      throw err; // bubble up to QueueManager retry loop
+      throw err;
     }
   }
 }

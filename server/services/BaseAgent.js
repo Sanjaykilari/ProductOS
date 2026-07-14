@@ -179,11 +179,21 @@ ${contextData.recentDecisions}`;
       WHERE name = ?
     `, [this.name]);
 
-    // Save final output payload to tasks table description or logs
-    await dbRun(`
-      UPDATE tasks 
-      SET description = ? 
-      WHERE id = ?
-    `, [`${task.description}\n\n=== Agent Execution Output ===\n${parsedResult.structuredOutput}`, task.id]);
+    // Store output in the dedicated agent_outputs table
+    try {
+      await dbRun(`
+        INSERT INTO agent_outputs (task_id, agent_name, output_content, output_type, summary, confidence, reasoning, status)
+        VALUES (?, ?, ?, 'text', ?, ?, ?, 'Completed')
+      `, [
+        task.id,
+        this.name,
+        parsedResult.structuredOutput || parsedResult.toString(),
+        parsedResult.summary || 'Task completed',
+        parsedResult.confidence || 0.8,
+        parsedResult.reasoning || 'Standard execution'
+      ]);
+    } catch (e) {
+      console.warn(`[Agent: ${this.name}] Could not save to agent_outputs:`, e.message);
+    }
   }
 }

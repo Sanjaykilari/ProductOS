@@ -323,6 +323,58 @@ export async function initDatabase() {
     )
   `);
 
+  // ==========================================
+  // DOCUMENTS TABLE — linked to projects/epics/tasks
+  // ==========================================
+  await dbRun(`
+    CREATE TABLE IF NOT EXISTS documents (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT,
+      doc_type TEXT DEFAULT 'General',
+      linked_item_type TEXT,
+      linked_item_id TEXT,
+      status TEXT DEFAULT 'Draft',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+    )
+  `);
+
+  // ==========================================
+  // AGENT TASK ASSIGNMENTS — explicit agent↔task mapping
+  // ==========================================
+  await dbRun(`
+    CREATE TABLE IF NOT EXISTS agent_task_assignments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id TEXT NOT NULL,
+      agent_name TEXT NOT NULL,
+      assigned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      status TEXT DEFAULT 'Assigned',
+      FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+      UNIQUE(task_id, agent_name)
+    )
+  `);
+
+  // ==========================================
+  // AGENT OUTPUTS — stores real AI execution results
+  // ==========================================
+  await dbRun(`
+    CREATE TABLE IF NOT EXISTS agent_outputs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id TEXT NOT NULL,
+      agent_name TEXT NOT NULL,
+      output_content TEXT,
+      output_type TEXT DEFAULT 'text',
+      summary TEXT,
+      confidence REAL DEFAULT 0.8,
+      reasoning TEXT,
+      status TEXT DEFAULT 'Completed',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    )
+  `);
+
   // Seed default data if providers table is empty
   const providersCount = await dbGet(`SELECT COUNT(*) as count FROM providers`);
   if (providersCount.count === 0) {

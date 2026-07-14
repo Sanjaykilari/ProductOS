@@ -20,7 +20,6 @@ class Orchestrator {
 
       const ruleCheck = await BusinessRulesEngine.canExecuteTask(task);
       if (ruleCheck.allowed) {
-        // Enqueue task for active agent
         const assignee = task.assignee || "Developer Agent";
         const priority = task.points || 1;
         
@@ -33,7 +32,6 @@ class Orchestrator {
         await dbRun(`UPDATE tasks SET status = 'Assigned' WHERE id = ?`, [taskId]);
         await eventBus.publish("TaskStatusChanged", { taskId, status: "Assigned" });
         
-        // Notify blocker state
         await dbRun(`
           INSERT INTO notifications (type, message)
           VALUES ('Warning', 'Task ${taskId} is blocked by pending requirements.')
@@ -45,22 +43,18 @@ class Orchestrator {
     eventBus.subscribe("TaskCompleted", async ({ taskId }) => {
       console.log(`[Orchestrator] TaskCompleted received for: ${taskId}`);
 
-      // Locate downstream blocked tasks
       const dependents = await dbAll(`
         SELECT task_id FROM task_dependencies WHERE depends_on_task_id = ?
       `, [taskId]);
 
       for (const dep of dependents) {
-        // Check if all blockers for downstream task are resolved
         const stillBlocked = await BusinessRulesEngine.canExecuteTask({ id: dep.task_id, status: "Approved" });
         if (stillBlocked.allowed) {
           console.log(`[Orchestrator] Unblocking downstream task [${dep.task_id}] automatically.`);
-          // Trigger queue dispatch
           await eventBus.publish("TaskApproved", { taskId: dep.task_id });
         }
       }
 
-      // Check completeness for story
       const task = await dbGet(`SELECT * FROM tasks WHERE id = ?`, [taskId]);
       if (task && task.story_id) {
         const storyCheck = await BusinessRulesEngine.canCompleteParent("Story", task.story_id);
@@ -69,7 +63,6 @@ class Orchestrator {
           await dbRun(`UPDATE stories SET status = 'Completed', dod = 'Passed' WHERE id = ?`, [task.story_id]);
           await eventBus.publish("StoryCompleted", { storyId: task.story_id });
 
-          // Propagate features
           const story = await dbGet(`SELECT * FROM stories WHERE id = ?`, [task.story_id]);
           if (story && story.feature_id) {
             const featCheck = await BusinessRulesEngine.canCompleteParent("Feature", story.feature_id);
@@ -77,7 +70,6 @@ class Orchestrator {
               await dbRun(`UPDATE features SET status = 'Completed' WHERE id = ?`, [story.feature_id]);
               await eventBus.publish("FeatureCompleted", { featureId: story.feature_id });
 
-              // Propagate Epics
               const feat = await dbGet(`SELECT * FROM features WHERE id = ?`, [story.feature_id]);
               if (feat && feat.epic_id) {
                 const epicCheck = await BusinessRulesEngine.canCompleteParent("Epic", feat.epic_id);
@@ -101,64 +93,80 @@ class Orchestrator {
     });
   }
 
+  // ─────────────────────────────────────────────────────────────
   // Generate workspace components from text idea
+  // ─────────────────────────────────────────────────────────────
   async initiateProjectFromIdea(ideaText) {
     console.log(`[Orchestrator] Generating workspace roadmap from: "${ideaText}"`);
 
-    // System prompt requesting structured JSON output
-    const prompt = `Convert this product idea into a complete Agile backlog mapping.
+    const prompt = `You are a Senior Product Manager. Convert this product idea into a complete Agile backlog.
 Idea: "${ideaText}"
 
-Response MUST be a single JSON object matching this structure:
+Response MUST be a single valid JSON object with this exact structure (no markdown, no code fences):
 {
   "project": { "title": "...", "description": "...", "tech_stack": "...", "timeline": "..." },
   "epics": [ { "id": "EPIC-1", "title": "...", "description": "..." } ],
   "features": [ { "id": "FEAT-1", "epic_id": "EPIC-1", "title": "...", "description": "..." } ],
-  "stories": [ { "id": "STORY-1", "feature_id": "FEAT-1", "title": "...", "template": "..." } ],
+  "stories": [ { "id": "STORY-1", "feature_id": "FEAT-1", "title": "...", "template": "As a user, I want..." } ],
   "tasks": [ { "id": "TASK-1", "story_id": "STORY-1", "title": "...", "description": "...", "assignee": "Developer Agent", "points": 3 } ],
-  "dependencies": [ { "task_id": "TASK-2", "depends_on_task_id": "TASK-1" } ]
-}`;
+  "dependencies": [ { "task_id": "TASK-2", "depends_on_task_id": "TASK-1" } ],
+  "documents": [
+    { "id": "DOC-1", "title": "Product Requirements Document", "doc_type": "PRD", "linked_item_type": "Project", "linked_item_id": "PROJECT", "content": "..." },
+    { "id": "DOC-2", "title": "Technical Architecture Spec", "doc_type": "Technical Spec", "linked_item_type": "Project", "linked_item_id": "PROJECT", "content": "..." },
+    { "id": "DOC-3", "title": "Epic Brief: ...", "doc_type": "Epic Brief", "linked_item_type": "Epic", "linked_item_id": "EPIC-1", "content": "..." }
+  ]
+}
 
-    // Call AIService in generate mode
+Assignee values must be one of: "PM Agent", "Developer Agent", "Frontend Agent", "Backend Agent", "Database Agent", "QA Agent", "Security Agent", "DevOps Agent", "Architecture Agent", "Documentation Agent", "UI Agent", "Research Agent".
+
+Generate at least 3 epics, 6 features, 10 stories, 15 tasks, 3 documents.
+Make the documents realistic — the PRD should have actual sections and content.`;
+
     const result = await AIService.generateCompletion({
       variables: { prompt },
       agentId: "PM Agent",
       preference: "cost-effective"
     });
 
-    // If sandbox fallbacks are active, result is returned as text
     let jsonPlan;
     try {
-      jsonPlan = JSON.parse(result.text);
+      // Try to extract JSON from the response (handle markdown code fences)
+      let rawText = result.text;
+      const jsonMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (jsonMatch) rawText = jsonMatch[1];
+      jsonPlan = JSON.parse(rawText);
     } catch (e) {
-      console.warn("[Orchestrator] AI output was not valid JSON, parsing with sandbox defaults.");
-      // Seeding sandbox default project template
+      console.warn("[Orchestrator] AI output was not valid JSON, using sandbox fallback.");
       jsonPlan = this.getSandboxProjectPlan(ideaText);
     }
 
     const projectId = `proj-${Date.now()}`;
     const project = jsonPlan.project;
 
-    // Map epics, features, stories, tasks, and dependencies to project-unique IDs to avoid constraint collisions
+    // Map all IDs to project-unique IDs
     const epics = (jsonPlan.epics || []).map(epic => ({
       ...epic,
+      origId: epic.id,
       id: `${epic.id}-${projectId}`
     }));
 
     const features = (jsonPlan.features || []).map(feat => ({
       ...feat,
+      origId: feat.id,
       id: `${feat.id}-${projectId}`,
       epic_id: `${feat.epic_id}-${projectId}`
     }));
 
     const stories = (jsonPlan.stories || []).map(story => ({
       ...story,
+      origId: story.id,
       id: `${story.id}-${projectId}`,
       feature_id: `${story.feature_id}-${projectId}`
     }));
 
     const tasks = (jsonPlan.tasks || []).map(task => ({
       ...task,
+      origId: task.id,
       id: `${task.id}-${projectId}`,
       story_id: `${task.story_id}-${projectId}`
     }));
@@ -169,7 +177,15 @@ Response MUST be a single JSON object matching this structure:
       depends_on_task_id: `${dep.depends_on_task_id}-${projectId}`
     }));
 
-    // 1. Insert Project (Draft status)
+    const documents = (jsonPlan.documents || []).map(doc => ({
+      ...doc,
+      id: `${doc.id}-${projectId}`,
+      linked_item_id: doc.linked_item_id === "PROJECT" 
+        ? projectId 
+        : `${doc.linked_item_id}-${projectId}`
+    }));
+
+    // 1. Insert Project
     await dbRun(`
       INSERT INTO projects (id, title, description, vision, goals, tech_stack, status)
       VALUES (?, ?, ?, ?, ?, ?, 'Draft')
@@ -244,6 +260,18 @@ Response MUST be a single JSON object matching this structure:
       }
     }
 
+    // 7. Insert Documents — linked to their parent artifacts
+    for (const doc of documents) {
+      try {
+        await dbRun(`
+          INSERT INTO documents (id, project_id, title, content, doc_type, linked_item_type, linked_item_id, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'Draft')
+        `, [doc.id, projectId, doc.title, doc.content || "", doc.doc_type, doc.linked_item_type, doc.linked_item_id]);
+      } catch (e) {
+        console.error("[Orchestrator] Document insert error", e);
+      }
+    }
+
     // Publish event
     await eventBus.publish("ProjectCreated", { projectId, title: project.title });
     
@@ -255,17 +283,17 @@ Response MUST be a single JSON object matching this structure:
     return { projectId, title: project.title, structure: jsonPlan };
   }
 
+  // ─────────────────────────────────────────────────────────────
   // Core Approval Interface
+  // ─────────────────────────────────────────────────────────────
   async approveArtifact(itemType, itemId) {
     console.log(`[Orchestrator] Approving artifact: ${itemType} | ID: ${itemId}`);
     
-    // 1. Update approval request
     await dbRun(`
       UPDATE approval_requests SET status = 'Approved'
       WHERE item_type = ? AND item_id = ?
     `, [itemType, itemId]);
 
-    // 2. Update actual item status
     let tableName = "tasks";
     if (itemType === "Project") tableName = "projects";
     else if (itemType === "Epic") tableName = "epics";
@@ -276,7 +304,6 @@ Response MUST be a single JSON object matching this structure:
       UPDATE ${tableName} SET status = 'Approved' WHERE id = ?
     `, [itemId]);
 
-    // 3. Trigger events
     if (itemType === "Task") {
       await eventBus.publish("TaskApproved", { taskId: itemId });
     }
@@ -284,18 +311,155 @@ Response MUST be a single JSON object matching this structure:
     return { success: true, status: "Approved" };
   }
 
-  // Get Default project layout if AI parsing fails
+  // ─────────────────────────────────────────────────────────────
+  // Approve all artifacts in a project
+  // ─────────────────────────────────────────────────────────────
+  async approveAllInProject(projectId) {
+    console.log(`[Orchestrator] Bulk approving all artifacts for project: ${projectId}`);
+
+    // Approve project
+    await dbRun(`UPDATE projects SET status = 'Approved' WHERE id = ?`, [projectId]);
+    await dbRun(`UPDATE approval_requests SET status = 'Approved' WHERE item_type = 'Project' AND item_id = ?`, [projectId]);
+
+    // Approve epics
+    const epics = await dbAll(`SELECT id FROM epics WHERE project_id = ?`, [projectId]);
+    for (const epic of epics) {
+      await dbRun(`UPDATE epics SET status = 'Approved' WHERE id = ?`, [epic.id]);
+      await dbRun(`UPDATE approval_requests SET status = 'Approved' WHERE item_type = 'Epic' AND item_id = ?`, [epic.id]);
+    }
+
+    // Approve features
+    for (const epic of epics) {
+      const features = await dbAll(`SELECT id FROM features WHERE epic_id = ?`, [epic.id]);
+      for (const feat of features) {
+        await dbRun(`UPDATE features SET status = 'Approved' WHERE id = ?`, [feat.id]);
+        await dbRun(`UPDATE approval_requests SET status = 'Approved' WHERE item_type = 'Feature' AND item_id = ?`, [feat.id]);
+      }
+
+      // Approve stories
+      for (const feat of features) {
+        const stories = await dbAll(`SELECT id FROM stories WHERE feature_id = ?`, [feat.id]);
+        for (const story of stories) {
+          await dbRun(`UPDATE stories SET status = 'Approved' WHERE id = ?`, [story.id]);
+          await dbRun(`UPDATE approval_requests SET status = 'Approved' WHERE item_type = 'Story' AND item_id = ?`, [story.id]);
+        }
+      }
+    }
+
+    // Approve tasks + trigger execution queue
+    const tasks = await dbAll(`
+      SELECT t.id FROM tasks t
+      JOIN stories s ON t.story_id = s.id
+      JOIN features f ON s.feature_id = f.id
+      JOIN epics e ON f.epic_id = e.id
+      WHERE e.project_id = ?
+    `, [projectId]);
+
+    for (const task of tasks) {
+      await dbRun(`UPDATE tasks SET status = 'Approved' WHERE id = ?`, [task.id]);
+      await dbRun(`UPDATE approval_requests SET status = 'Approved' WHERE item_type = 'Task' AND item_id = ?`, [task.id]);
+    }
+
+    // Approve documents
+    await dbRun(`UPDATE documents SET status = 'Approved' WHERE project_id = ?`, [projectId]);
+
+    await dbRun(`
+      INSERT INTO notifications (type, message)
+      VALUES ('Success', 'All artifacts in project ${projectId} have been approved.')
+    `);
+
+    return { success: true, approvedCount: epics.length + tasks.length };
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Get full project tree
+  // ─────────────────────────────────────────────────────────────
+  async getProjectFull(projectId) {
+    const project = await dbGet(`SELECT * FROM projects WHERE id = ?`, [projectId]);
+    if (!project) throw new Error("Project not found");
+
+    const epics = await dbAll(`SELECT * FROM epics WHERE project_id = ? ORDER BY created_at`, [projectId]);
+    
+    const fullEpics = [];
+    for (const epic of epics) {
+      const features = await dbAll(`SELECT * FROM features WHERE epic_id = ? ORDER BY created_at`, [epic.id]);
+      
+      const fullFeatures = [];
+      for (const feat of features) {
+        const stories = await dbAll(`SELECT * FROM stories WHERE feature_id = ? ORDER BY created_at`, [feat.id]);
+        
+        const fullStories = [];
+        for (const story of stories) {
+          const tasks = await dbAll(`SELECT * FROM tasks WHERE story_id = ? ORDER BY created_at`, [story.id]);
+          
+          // Attach outputs to tasks
+          const tasksWithOutputs = [];
+          for (const task of tasks) {
+            const outputs = await dbAll(`SELECT * FROM agent_outputs WHERE task_id = ? ORDER BY created_at DESC`, [task.id]);
+            tasksWithOutputs.push({ ...task, outputs });
+          }
+
+          fullStories.push({ ...story, tasks: tasksWithOutputs });
+        }
+        fullFeatures.push({ ...feat, stories: fullStories });
+      }
+      fullEpics.push({ ...epic, features: fullFeatures });
+    }
+
+    const documents = await dbAll(`SELECT * FROM documents WHERE project_id = ? ORDER BY created_at`, [projectId]);
+
+    return { ...project, epics: fullEpics, documents };
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Sandbox fallback project plan
+  // ─────────────────────────────────────────────────────────────
   getSandboxProjectPlan(idea) {
     return {
-      project: { title: "AI-Drafted: " + idea, description: "Workspace roadmap generated for idea.", tech_stack: "React + SQLite", timeline: "4 Weeks" },
-      epics: [ { id: "epic-sandbox-1", title: "Core Gateway Setup", description: "Implement routes and base adapters." } ],
-      features: [ { id: "feat-sandbox-1", epic_id: "epic-sandbox-1", title: "API controller routes", description: "Expose REST endpoints." } ],
-      stories: [ { id: "story-sandbox-1", feature_id: "feat-sandbox-1", title: "Post chat completion", template: "As a client, I want to fetch completions." } ],
-      tasks: [
-        { id: "task-sandbox-1", story_id: "story-sandbox-1", title: "Write express routes", description: "Route mappings.", assignee: "Developer Agent", points: 3 },
-        { id: "task-sandbox-2", story_id: "story-sandbox-1", title: "Run security checks", description: "Scans.", assignee: "Security Agent", points: 2 }
+      project: { title: "AI-Drafted: " + idea, description: "Workspace roadmap generated for idea.", tech_stack: "React + Node.js + SQLite", timeline: "4 Weeks" },
+      epics: [
+        { id: "EPIC-1", title: "Core Platform Setup", description: "Set up the foundational infrastructure, authentication, and base UI components." },
+        { id: "EPIC-2", title: "Feature Implementation", description: "Build the primary user-facing features and business logic." },
+        { id: "EPIC-3", title: "Testing & Deployment", description: "Quality assurance, performance testing, and deployment pipeline." }
       ],
-      dependencies: [ { task_id: "task-sandbox-2", depends_on_task_id: "task-sandbox-1" } ]
+      features: [
+        { id: "FEAT-1", epic_id: "EPIC-1", title: "Project scaffolding & configuration", description: "Initialize project structure with build tools." },
+        { id: "FEAT-2", epic_id: "EPIC-1", title: "Database schema design", description: "Design and implement the relational database schema." },
+        { id: "FEAT-3", epic_id: "EPIC-2", title: "Core API endpoints", description: "Implement RESTful API routes." },
+        { id: "FEAT-4", epic_id: "EPIC-2", title: "Frontend UI components", description: "Build responsive UI components." },
+        { id: "FEAT-5", epic_id: "EPIC-3", title: "Unit & integration tests", description: "Write comprehensive test suites." },
+        { id: "FEAT-6", epic_id: "EPIC-3", title: "CI/CD pipeline", description: "Set up deployment pipeline." }
+      ],
+      stories: [
+        { id: "STORY-1", feature_id: "FEAT-1", title: "Initialize repo with Vite + React", template: "As a developer, I want a preconfigured project so I can start building quickly." },
+        { id: "STORY-2", feature_id: "FEAT-2", title: "Design database models", template: "As a developer, I want a normalized schema so data integrity is maintained." },
+        { id: "STORY-3", feature_id: "FEAT-3", title: "Build CRUD API routes", template: "As a user, I want API endpoints so the app can read and write data." },
+        { id: "STORY-4", feature_id: "FEAT-4", title: "Build dashboard layout", template: "As a user, I want a clean dashboard so I can see key metrics at a glance." },
+        { id: "STORY-5", feature_id: "FEAT-5", title: "Write API endpoint tests", template: "As a QA engineer, I want automated tests so regressions are caught early." }
+      ],
+      tasks: [
+        { id: "TASK-1", story_id: "STORY-1", title: "Run create-vite scaffold", description: "Initialize React + Vite project structure.", assignee: "Developer Agent", points: 2 },
+        { id: "TASK-2", story_id: "STORY-1", title: "Configure ESLint and Prettier", description: "Set up linting and formatting.", assignee: "Developer Agent", points: 1 },
+        { id: "TASK-3", story_id: "STORY-2", title: "Write SQL schema migrations", description: "Create tables for all entities.", assignee: "Database Agent", points: 5 },
+        { id: "TASK-4", story_id: "STORY-2", title: "Seed sample data", description: "Insert test data for development.", assignee: "Database Agent", points: 2 },
+        { id: "TASK-5", story_id: "STORY-3", title: "Implement GET/POST/PUT/DELETE routes", description: "Full CRUD controller logic.", assignee: "Backend Agent", points: 5 },
+        { id: "TASK-6", story_id: "STORY-3", title: "Add input validation middleware", description: "Validate request bodies.", assignee: "Backend Agent", points: 3 },
+        { id: "TASK-7", story_id: "STORY-4", title: "Build header and sidebar components", description: "Navigation layout.", assignee: "Frontend Agent", points: 3 },
+        { id: "TASK-8", story_id: "STORY-4", title: "Build data cards and charts", description: "Dashboard visualizations.", assignee: "Frontend Agent", points: 5 },
+        { id: "TASK-9", story_id: "STORY-5", title: "Write Jest test suite for API", description: "Cover all CRUD endpoints.", assignee: "QA Agent", points: 5 },
+        { id: "TASK-10", story_id: "STORY-5", title: "Run security vulnerability scan", description: "OWASP dependency check.", assignee: "Security Agent", points: 3 }
+      ],
+      dependencies: [
+        { task_id: "TASK-3", depends_on_task_id: "TASK-1" },
+        { task_id: "TASK-5", depends_on_task_id: "TASK-3" },
+        { task_id: "TASK-7", depends_on_task_id: "TASK-5" },
+        { task_id: "TASK-9", depends_on_task_id: "TASK-5" }
+      ],
+      documents: [
+        { id: "DOC-1", title: "Product Requirements Document", doc_type: "PRD", linked_item_type: "Project", linked_item_id: "PROJECT", content: `# Product Requirements Document\n\n## Overview\n${idea}\n\n## Objectives\n- Build a functional MVP within 4 weeks\n- Ensure clean architecture for scalability\n- Implement core user-facing features\n\n## Target Users\nDevelopers and product managers looking for an efficient tool.\n\n## Success Metrics\n- Feature completion rate > 90%\n- Zero critical bugs at launch\n- Response time < 200ms for API calls` },
+        { id: "DOC-2", title: "Technical Architecture", doc_type: "Technical Spec", linked_item_type: "Project", linked_item_id: "PROJECT", content: `# Technical Architecture\n\n## Stack\n- Frontend: React + Vite\n- Backend: Node.js + Express\n- Database: SQLite (MVP) → PostgreSQL (Production)\n\n## API Design\n- RESTful JSON APIs\n- JWT authentication\n- Rate limiting middleware\n\n## Deployment\n- Docker containers\n- CI/CD via GitHub Actions` },
+        { id: "DOC-3", title: "Epic Brief: Core Platform Setup", doc_type: "Epic Brief", linked_item_type: "Epic", linked_item_id: "EPIC-1", content: `# Epic Brief: Core Platform Setup\n\n## Scope\nEstablish the foundation including project scaffolding, database design, and base configuration.\n\n## Acceptance Criteria\n- Project builds without errors\n- Database migrations run successfully\n- Development server starts on port 5173` }
+      ]
     };
   }
 }
